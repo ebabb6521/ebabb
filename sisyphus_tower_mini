@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sisyphus Tower Mini</title>
+    <style>
+        body { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh;
+            margin: 0;
+            background-color: #1a1a2e;
+            font-family: monospace;
+        }
+        canvas { 
+            border: 4px solid #ff6b6b; 
+            background-color: #16213e;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="500" height="600"></canvas>
+    <script>
+class SisyphusTower {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.width = this.canvas.width;
+        this.height = this.canvas.height;
+
+        this.deathMessages = [
+            "Gravity: 1, You: 0",
+            "Spectacular descent into mediocrity!",
+            "Did you trip over your own incompetence?",
+            "Falling: The one thing you're truly great at!",
+            "Error 404: Skill not found."
+        ];
+
+        this.state = {
+            player: {
+                x: this.width / 2,
+                y: this.height - 50,
+                width: 20,
+                height: 20,
+                color: '#4ecdc4',
+                velocityX: 0,
+                velocityY: 0,
+                jumpCharge: 0
+            },
+            platforms: [],
+            camera: {
+                offsetY: 0
+            },
+            gameOver: false,
+            deathReason: null,
+            lag: {
+                current: 0,
+                max: 350,
+                increment: 0.05,
+                warningShown: false
+            },
+            height: 0,
+            restartCooldown: 0
+        };
+
+        this.setupControls();
+        this.generatePlatforms();
+        this.startGameLoop();
+    }
+
+    drawCrown(x, y, width) {
+        const ctx = this.ctx;
+        ctx.fillStyle = 'gold';
+        
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + width/4, y - 10);
+        ctx.lineTo(x + width/2, y);
+        ctx.lineTo(x + 3*width/4, y - 10);
+        ctx.lineTo(x + width, y);
+        ctx.lineTo(x + width, y + 5);
+        ctx.lineTo(x, y + 5);
+        ctx.closePath();
+        
+        ctx.fill();
+    }
+
+    setupControls() {
+        this.keys = {};
+        
+        window.addEventListener('keydown', (e) => {
+            if (this.state.gameOver) {
+                this.restartGame();
+                return;
+            }
+            this.keys[e.code] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            this.keys[e.code] = false;
+        });
+    }
+
+    restartGame() {
+        this.state.player = {
+            x: this.width / 2,
+            y: this.height - 50,
+            width: 20,
+            height: 20,
+            color: '#4ecdc4',
+            velocityX: 0,
+            velocityY: 0,
+            jumpCharge: 0
+        };
+
+        this.state.camera.offsetY = 0;
+        this.state.gameOver = false;
+        this.state.deathReason = null;
+        this.state.lag = {
+            current: 0,
+            max: 350,
+            increment: 0.05,
+            warningShown: false
+        };
+        this.state.height = 0;
+        this.state.restartCooldown = 0;
+
+        this.keys = {};
+
+        this.generatePlatforms();
+    }
+
+    generatePlatforms() {
+        this.state.platforms = [];
+        let y = this.height;
+        
+        this.state.platforms.push({
+            x: this.width / 2 - 30,
+            y: y - 10,
+            width: 60,
+            height: 10
+        });
+
+        for (let i = 0; i < 200; i++) {
+            y -= 100 + Math.random() * 50;
+            this.state.platforms.push({
+                x: Math.random() * (this.width - 60),
+                y: y,
+                width: 60,
+                height: 10,
+                moving: Math.random() < 0.2
+            });
+        }
+    }
+
+    updatePhysics() {
+        const player = this.state.player;
+        const keys = this.keys;
+
+        if (this.state.gameOver) {
+            this.state.restartCooldown++;
+            return;
+        }
+
+        player.velocityX = 0;
+        if (keys['ArrowLeft']) player.velocityX = -3;
+        if (keys['ArrowRight']) player.velocityX = 3;
+
+        if (keys['Space']) {
+            player.jumpCharge = Math.min(player.jumpCharge + 0.5, 15);
+        }
+
+        player.velocityY += 0.5;
+        
+        player.x += player.velocityX;
+        player.y += player.velocityY;
+
+        let onPlatform = false;
+        for (let platform of this.state.platforms) {
+            if (this.checkPlatformCollision(player, platform)) {
+                onPlatform = true;
+                player.y = platform.y - player.height;
+                player.velocityY = 0;
+
+                if (keys['Space'] && player.jumpCharge > 0) {
+                    player.velocityY = -player.jumpCharge * 1.5;
+                    this.state.height += player.jumpCharge * 1.5;
+                    player.jumpCharge = 0;
+                }
+                break;
+            }
+        }
+
+        this.state.lag.current += this.state.lag.increment;
+
+        if (this.state.lag.current >= this.state.lag.max) {
+            this.gameOver('lag');
+            return;
+        }
+
+        if (player.y < this.height * 0.4) {
+            const diff = this.height * 0.4 - player.y;
+            player.y += diff;
+            this.state.camera.offsetY += diff;
+            
+            this.state.platforms.forEach(p => p.y += diff);
+        }
+
+        if (player.y > this.height + this.state.camera.offsetY) {
+            this.gameOver('fall');
+        }
+    }
+
+    gameOver(reason) {
+        this.state.gameOver = true;
+        this.state.deathReason = reason;
+    }
+
+    checkPlatformCollision(player, platform) {
+        return player.x < platform.x + platform.width &&
+               player.x + player.width > platform.x &&
+               player.y + player.height > platform.y &&
+               player.y + player.height < platform.y + platform.height &&
+               player.velocityY > 0;
+    }
+
+    renderHeightLagIndicator() {
+        const ctx = this.ctx;
+        const height = this.state.height;
+        const lag = this.state.lag.current;
+        const maxHeight = 10000;
+        const maxLag = this.state.lag.max;
+
+        const heightBarWidth = 30;
+        const heightBarMaxHeight = this.height - 100;
+        const heightProgress = Math.min(1, height / maxHeight);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillRect(10, 50, heightBarWidth, heightBarMaxHeight);
+        
+        ctx.fillStyle = '#4ecdc4';
+        ctx.fillRect(
+            10, 
+            50 + heightBarMaxHeight - (heightBarMaxHeight * heightProgress), 
+            heightBarWidth, 
+            heightBarMaxHeight * heightProgress
+        );
+
+        this.drawCrown(10, 50 - 5, heightBarWidth);
+
+        ctx.fillStyle = "#fff";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`${Math.floor(height)}/10000`, 10 + heightBarWidth / 2, 50 + heightBarMaxHeight / 2);
+
+        const lagBarWidth = 30;
+        const lagBarMaxHeight = this.height - 100;
+        const lagProgress = Math.min(1, lag / maxLag);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillRect(this.width - 40, 50, lagBarWidth, lagBarMaxHeight);
+        
+        ctx.fillStyle = '#ff6b6b';
+        ctx.fillRect(
+            this.width - 40, 
+            50 + lagBarMaxHeight - (lagBarMaxHeight * lagProgress), 
+            lagBarWidth, 
+            lagBarMaxHeight * lagProgress
+        );
+
+        ctx.fillStyle = "#fff";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`Lag: ${Math.floor(lag)} ms`, this.width - 40 + lagBarWidth / 2, 12);
+    }
+
+    render() {
+        this.ctx.fillStyle = '#1a1a2e';
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        this.ctx.fillStyle = '#ff6b6b';
+        for (let platform of this.state.platforms) {
+            if (platform.y >= 0 && platform.y <= this.height) {
+                this.ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+            }
+        }
+
+        this.ctx.fillStyle = this.state.player.color;
+        this.ctx.fillRect(
+            this.state.player.x, 
+            this.state.player.y, 
+            this.state.player.width, 
+            this.state.player.height
+        );
+
+        this.renderHeightLagIndicator();
+
+        if (this.state.gameOver) {
+            this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            this.ctx.fillRect(0, 0, this.width, this.height);
+
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = 'red';
+            this.ctx.font = '30px monospace';
+
+            if (this.state.deathReason === 'lag') {
+                this.ctx.fillText('LAG CONSUMED YOU', this.width / 2, this.height / 2 - 50);
+                this.ctx.fillText(`${Math.floor(this.state.lag.current)}ms of pure failure`, this.width / 2, this.height / 2);
+            } else if (this.state.deathReason === 'fall') {
+                const mockMessage = this.deathMessages[Math.floor(Math.random() * this.deathMessages.length)];
+                this.ctx.fillText('YOU FELL', this.width / 2, this.height / 2 - 50);
+                this.ctx.fillText(mockMessage, this.width / 2, this.height / 2);
+            }
+
+            this.ctx.fillStyle = 'white';
+            this.ctx.font = '20px monospace';
+            this.ctx.fillText('Press any key to restart', this.width / 2, this.height / 2 + 100);
+        }
+    }
+
+    startGameLoop() {
+        const gameLoop = () => {
+            this.updatePhysics();
+            this.render();
+            requestAnimationFrame(gameLoop);
+        };
+        gameLoop();
+    }
+}
+
+new SisyphusTower();
+    </script>
+</body>
+</html>
